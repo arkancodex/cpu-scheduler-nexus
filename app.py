@@ -1,11 +1,6 @@
-"""
-CPU Scheduler - Flask Backend
-Ye file frontend se request receive karti hai aur sahi algorithm call karti hai.
-Run karo: python app.py
-"""
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import os
 
 from fcfs import run_fcfs
 from sjf import run_sjf
@@ -15,20 +10,21 @@ from priority import run_priority, run_priority_preemptive
 
 app = Flask(__name__)
 
-# CORS allow (frontend connect ke liye)
+# CORS (frontend connect ke liye)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 
-# 🔥 Health check route (Render ke liye important)
+# ✅ Health check (deployment + testing)
 @app.route("/", methods=["GET"])
 def home():
-    return "CPU Scheduler Backend Running 🚀"
+    return jsonify({
+        "status": "ok",
+        "message": "CPU Scheduler Backend Running 🚀"
+    })
 
 
+# ✅ Utility function
 def calculate_averages(metrics, gantt, processes):
-    """
-    Common stats calculate karo - average WT, TAT, RT aur CPU utilization.
-    """
     n = len(metrics)
     if n == 0:
         return 0, 0, 0, 0
@@ -39,7 +35,6 @@ def calculate_averages(metrics, gantt, processes):
 
     total_burst = sum(p["burst_time"] for p in processes)
 
-    # Safe handling (empty gantt avoid crash)
     end_time = max((block["end"] for block in gantt), default=0)
     start_time = min((p["arrival_time"] for p in processes), default=0)
 
@@ -49,35 +44,33 @@ def calculate_averages(metrics, gantt, processes):
     return avg_wt, avg_tat, avg_rt, cpu_util
 
 
+# ✅ Main API
 @app.route("/simulate", methods=["POST"])
 def simulate():
-    data = request.get_json()
-
-    if not data:
-        return jsonify({"error": "Request body JSON nahi hai"}), 400
-
-    algorithm = data.get("algorithm")
-    processes = data.get("processes", [])
-    quantum = data.get("quantum", 2)
-
-    if not algorithm:
-        return jsonify({"error": "Algorithm specify karo"}), 400
-
-    if not processes:
-        return jsonify({"error": "Koi bhi process nahi diya"}), 400
-
-    # Validation
-    for proc in processes:
-        if "pid" not in proc or "arrival_time" not in proc or "burst_time" not in proc:
-            return jsonify({"error": "Process mein pid, arrival_time, burst_time hona chahiye"}), 400
-        if proc["burst_time"] < 1:
-            return jsonify({"error": f"{proc['pid']} ka burst time 1 se kam nahi ho sakta"}), 400
-
     try:
-        print("Algorithm:", algorithm)
-        print("Processes:", processes)
+        data = request.get_json()
 
-        # Algorithm selection
+        if not data:
+            return jsonify({"error": "Request body JSON nahi hai"}), 400
+
+        algorithm = data.get("algorithm")
+        processes = data.get("processes", [])
+        quantum = data.get("quantum", 2)
+
+        if not algorithm:
+            return jsonify({"error": "Algorithm specify karo"}), 400
+
+        if not processes:
+            return jsonify({"error": "Koi bhi process nahi diya"}), 400
+
+        # ✅ Validation
+        for proc in processes:
+            if "pid" not in proc or "arrival_time" not in proc or "burst_time" not in proc:
+                return jsonify({"error": "Process mein pid, arrival_time, burst_time hona chahiye"}), 400
+            if proc["burst_time"] < 1:
+                return jsonify({"error": f"{proc['pid']} ka burst time 1 se kam nahi ho sakta"}), 400
+
+        # ✅ Algorithm selection
         if algorithm == "fcfs":
             gantt, metrics, algo_name = run_fcfs(processes)
 
@@ -101,9 +94,10 @@ def simulate():
         else:
             return jsonify({"error": f"Unknown algorithm: {algorithm}"}), 400
 
+        # ✅ Stats calculate
         avg_wt, avg_tat, avg_rt, cpu_util = calculate_averages(metrics, gantt, processes)
 
-        response = {
+        return jsonify({
             "algorithm": algo_name,
             "gantt": gantt,
             "metrics": metrics,
@@ -111,14 +105,14 @@ def simulate():
             "avg_tat": avg_tat,
             "avg_rt": avg_rt,
             "cpu_util": cpu_util
-        }
-
-        return jsonify(response), 200
+        }), 200
 
     except Exception as e:
         print("Error:", str(e))
         return jsonify({"error": f"Simulation failed: {str(e)}"}), 500
 
 
+# ✅ ENTRY POINT (local + production compatible)
 if __name__ == "__main__":
-    app.run()
+    port = int(os.environ.get("PORT", 5000))  # local = 5000, render auto
+    app.run(host="0.0.0.0", port=port, debug=True)
