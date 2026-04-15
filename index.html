@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NEXUS — CPU Scheduler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --ink:#06070a;
+  --ink2:#0c0f14;
+  --surface:rgba(255,255,255,0.032);
+  --surface2:rgba(255,255,255,0.06);
+  --rim:rgba(255,255,255,0.07);
+  --rim2:rgba(255,255,255,0.14);
+
+  --a:#c8ff57;
+  --b:#57b8ff;
+  --c:#ff6b6b;
+  --d:#c084fc;
+  --e:#34d399;
+
+  --text:#eef2f7;
+  --muted:rgba(238,242,247,0.38);
+  --ghost:rgba(238,242,247,0.12);
+
+  --r:12px;
+  --rL:18px;
+}
+
+html{scroll-behavior:smooth}
+body{
+  font-family:'DM Mono',monospace;
+  background:var(--ink);
+  color:var(--text);
+  min-height:100vh;
+  overflow-x:hidden;
+  cursor:default;
+}
+
+/* noise layer */
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  background-size:200px 200px;opacity:0.028;
+}
+
+/* ── ORBS ── */
+.orbs{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.orb{position:absolute;border-radius:50%;filter:blur(120px);animation:drift 26s ease-in-out infinite}
+.o1{width:750px;height:750px;background:var(--a);opacity:.09;top:-260px;left:-180px;animation-duration:30s}
+.o2{width:550px;height:550px;background:var(--b);opacity:.09;top:35%;right:-160px;animation-duration:22s;animation-delay:-9s}
+.o3{width:450px;height:450px;background:var(--d);opacity:.07;bottom:-80px;left:35%;animation-duration:34s;animation-delay:-18s}
+@keyframes drift{
+  0%,100%{transform:translate(0,0) scale(1)}
+  25%{transform:translate(50px,-40px) scale(1.06)}
+  50%{transform:translate(-25px,55px) scale(0.93)}
+  75%{transform:translate(35px,25px) scale(1.04)}
+}
+
+/* ── SHELL ── */
+.shell{position:relative;z-index:2;display:grid;grid-template-rows:auto 1fr;min-height:100vh}
+
+/* ══════════ HEADER ══════════ */
+.hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 28px;
+  border-bottom:1px solid var(--rim);
+  background:rgba(6,7,10,0.75);
+  backdrop-filter:blur(32px) saturate(1.4);
+  position:sticky;top:0;z-index:100;
+}
+.hdr-left{display:flex;align-items:center;gap:16px}
+.logo{
+  width:40px;height:40px;border-radius:10px;
+  background:var(--a);
+  display:grid;place-items:center;flex-shrink:0;
+  position:relative;
+}
+.logo::after{
+  content:'';position:absolute;inset:-3px;border-radius:13px;
+  background:var(--a);filter:blur(14px);opacity:0.35;z-index:-1;
+}
+.logo svg{color:#000}
+.brand-name{
+  font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
+  letter-spacing:.5px;color:var(--text);
+}
+.brand-sub{
+  font-size:8px;letter-spacing:3.5px;color:var(--muted);
+  text-transform:uppercase;margin-top:1px;
+}
+.hdr-right{display:flex;align-items:center;gap:14px}
+.status-pill{
+  display:flex;align-items:center;gap:7px;
+  border:1px solid var(--rim2);border-radius:100px;
+  padding:5px 14px;font-size:9px;letter-spacing:2.5px;color:var(--muted);
+}
+.live-dot{
+  width:6px;
+  height:6px;
+  border-radius:50%;
+  background:#c8ff57;
+
+  box-shadow:
+    0 0 6px #c8ff57,
+    0 0 12px #c8ff57,
+    0 0 18px rgba(200,255,87,0.8);
+
+  animation:blink 1.6s ease-in-out infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.shortcut{
+  font-size:9px;letter-spacing:1px;color:var(--ghost);
+  border:1px solid var(--rim);border-radius:5px;padding:3px 9px;
+  background:var(--surface);
+}
+.github-btn{
+  display:flex;
+  align-items:center;
+  gap:6px;
+
+  padding:6px 12px;
+
+  border:1px solid rgba(255,255,255,0.7);
+  border-radius:6px;
+
+  color:#fff;
+  font-size:11px;
+  letter-spacing:1px;
+
+  background:transparent;
+
+  transition:all 0.2s ease;
+}
+
+/* ═════════ BODY GRID ══════════ */
+.body{
+  display:grid;
+  grid-template-columns:390px 1fr;
+  min-height:0;
+}
+
+/* ══════════ SIDEBAR ══════════ */
+.sidebar{
+  border-right:1px solid var(--rim);
+  background:rgba(6,7,10,0.55);
+  backdrop-filter:blur(20px);
+  display:flex;flex-direction:column;
+  overflow-y:auto;max-height:calc(100vh - 73px);
+}
+.sidebar::-webkit-scrollbar{width:2px}
+.sidebar::-webkit-scrollbar-thumb{background:var(--rim2);border-radius:2px}
+
+.sb-pad{padding:22px 22px 0}
+.sb-divider{height:1px;background:var(--rim);margin:0 22px}
+
+/* section label */
+.sec-lbl{
+  font-size:8px;letter-spacing:3.5px;color:var(--muted);
+  text-transform:uppercase;
+  display:flex;align-items:center;gap:10px;margin-bottom:14px;
+}
+.sec-lbl::after{content:'';flex:1;height:1px;background:var(--rim)}
+
+/* ── ALGO CHIPS ── */
+.algo-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.algo-chip{
+  padding:11px 13px;border:1px solid var(--rim);
+  border-radius:var(--r);background:var(--surface);
+  cursor:pointer;transition:all .18s ease;position:relative;overflow:hidden;
+}
+.algo-chip:hover{border-color:var(--rim2);background:var(--surface2)}
+.algo-chip.active{border-color:var(--a);background:rgba(200,255,87,.07)}
+.algo-chip.active .chip-n{color:var(--a)}
+.chip-idx{font-size:8px;letter-spacing:2px;color:var(--ghost);display:block;margin-bottom:4px}
+.chip-n{
+  font-family:'Syne',sans-serif;font-size:11px;font-weight:700;
+  color:var(--text);display:block;transition:color .15s;
+}
+.chip-active-bar{
+  display:none;
+}
+.algo-chip.active .chip-active-bar{transform:scaleX(1)}
+
+/* quantum */
+.quantum-wrap{
+  display:none;margin-top:10px;
+  border:1px solid rgba(200,255,87,.22);border-radius:var(--r);
+  background:rgba(200,255,87,.04);padding:13px 16px;
+  animation:fade-down .22s ease;
+}
+.quantum-wrap.show{display:flex;align-items:center;gap:10px}
+@keyframes fade-down{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.q-lbl{font-size:9px;letter-spacing:2px;color:var(--a);white-space:nowrap}
+.q-inp{
+  flex:1;background:transparent;border:none;outline:none;
+  font-family:'Syne',sans-serif;font-size:22px;font-weight:800;
+  color:var(--a);text-align:right;min-width:0;
+}
+.q-suf{font-size:10px;color:var(--muted)}
+
+/* ── FORM ── */
+.form-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:7px}
+.f-field{
+  background:var(--surface);border:1px solid var(--rim);
+  border-radius:10px;padding:9px 11px;
+  transition:border-color .15s,background .15s;
+}
+.f-field:focus-within{border-color:rgba(200,255,87,.35);background:rgba(200,255,87,.04)}
+.f-field label{display:block;font-size:7.5px;letter-spacing:2px;color:var(--muted);margin-bottom:4px}
+.f-field input{
+  width:100%;background:transparent;border:none;outline:none;
+  font-family:'DM Mono',monospace;font-size:13px;color:var(--text);
+}
+.pid-row .f-field input{font-family:'Syne',sans-serif;font-size:16px;font-weight:700;letter-spacing:.5px}
+.pid-row{margin-bottom:7px}
+.pid-row .f-field{border-color:var(--rim2)}
+
+.btn-add{
+  width:100%;border:none;border-radius:var(--r);
+  background:var(--a);color:#000;
+  font-family:'Syne',sans-serif;font-size:12px;font-weight:800;letter-spacing:1.5px;
+  padding:13px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  transition:all .18s ease;margin-top:4px;
+  position:relative;overflow:hidden;
+}
+.btn-add::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(120deg,transparent 0%,rgba(255,255,255,.2) 50%,transparent 100%);
+  transform:translateX(-150%);transition:transform .55s ease;
+}
+.btn-add:hover{transform:translateY(-1px);box-shadow:0 8px 26px rgba(200,255,87,.32)}
+.btn-add:hover::before{transform:translateX(150%)}
+.btn-add:active{transform:translateY(0)}
+
+/* ── QUEUE ── */
+.queue-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}
+.q-title-group{display:flex;align-items:center;gap:10px}
+.q-title{font-family:'Syne',sans-serif;font-size:11px;font-weight:700;letter-spacing:.5px}
+
+/* Ring counter */
+.ring-wrap{position:relative;width:28px;height:28px;flex-shrink:0}
+.ring-svg{width:28px;height:28px;transform:rotate(-90deg)}
+.ring-track{fill:none;stroke:var(--rim2);stroke-width:2.5}
+.ring-fill{fill:none;stroke:var(--a);stroke-width:2.5;stroke-linecap:round;stroke-dasharray:75;stroke-dashoffset:75;transition:stroke-dashoffset .55s cubic-bezier(.4,0,.2,1);filter:drop-shadow(0 0 4px var(--a))}
+.ring-val{position:absolute;inset:0;display:grid;place-items:center;font-family:'Syne',sans-serif;font-size:9px;font-weight:800;color:var(--a)}
+
+.btn-sample{
+  font-family:'DM Mono',monospace;font-size:8.5px;letter-spacing:1px;
+  color:var(--muted);background:transparent;
+  border:1px solid var(--rim);border-radius:6px;
+  padding:5px 11px;cursor:pointer;transition:all .15s;
+}
+.btn-sample:hover{color:var(--text);border-color:var(--rim2)}
+
+#processList{display:flex;flex-direction:column;gap:5px}
+.proc-empty{font-size:9px;letter-spacing:2px;color:var(--ghost);text-align:center;padding:28px 0}
+
+.p-card{
+  display:flex;align-items:center;gap:9px;
+  background:var(--surface);border:1px solid var(--rim);
+  border-radius:10px;padding:9px 11px;
+  position:relative;overflow:hidden;transition:all .15s;
+  animation:card-pop .3s cubic-bezier(.34,1.56,.64,1) both;
+}
+@keyframes card-pop{from{opacity:0;transform:scale(.93) translateY(6px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.p-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--pc,var(--a))}
+.p-card:hover{border-color:var(--rim2);background:var(--surface2)}
+
+.p-avatar{
+  width:28px;height:28px;border-radius:7px;flex-shrink:0;
+  display:grid;place-items:center;
+  font-family:'Syne',sans-serif;font-size:9px;font-weight:800;color:#000;
+}
+.p-meta{flex:1;min-width:0}
+.p-name{font-family:'Syne',sans-serif;font-size:12px;font-weight:700;margin-bottom:2px}
+.p-tags{display:flex;gap:5px}
+.p-tag{font-size:8px;letter-spacing:1px;color:var(--muted);background:var(--surface2);padding:2px 6px;border-radius:4px}
+.btn-rm{
+  background:none;border:none;cursor:pointer;color:rgba(255,107,107,.35);
+  padding:4px;border-radius:6px;transition:all .15s;display:flex;flex-shrink:0;
+}
+.btn-rm:hover{color:var(--c);background:rgba(255,107,107,.1)}
+
+/* ── SIMULATE BTN ── */
+.sb-foot{padding:18px 22px;border-top:1px solid var(--rim)}
+.btn-sim{
+  width:100%;background:transparent;
+  border:1px solid var(--rim2);border-radius:var(--r);
+  color:var(--text);
+  font-family:'Syne',sans-serif;font-size:13px;font-weight:700;letter-spacing:2.5px;
+  padding:15px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  transition:all .22s ease;position:relative;overflow:hidden;
+}
+.btn-sim::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,rgba(200,255,87,.1),rgba(87,184,255,.06));
+  opacity:0;transition:opacity .22s;
+}
+.btn-sim:hover{border-color:var(--a);box-shadow:0 0 0 1px var(--a),0 8px 28px rgba(200,255,87,.12)}
+.btn-sim:hover::after{opacity:1}
+.btn-sim:disabled{opacity:.25;cursor:not-allowed;pointer-events:none}
+.sim-icon{transition:transform .18s}
+.btn-sim:hover .sim-icon{transform:scale(1.2)}
+.spin{animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ══════════ STAGE ══════════ */
+.stage{background:var(--ink2);overflow-y:auto}
+.stage::-webkit-scrollbar{width:2px}
+.stage::-webkit-scrollbar-thumb{background:var(--rim2);border-radius:2px}
+
+/* empty */
+.empty-state{
+  height:100%;min-height:calc(100vh - 73px);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:18px;padding:60px;
+}
+.cpu-anim{
+  width:110px;height:110px;
+  animation:float 5s ease-in-out infinite;
+}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+.empty-h{
+  font-family:'Syne',sans-serif;font-size:17px;font-weight:700;
+  color:var(--muted);letter-spacing:-.2px;text-align:center;
+}
+.empty-p{font-size:10px;color:var(--ghost);letter-spacing:1.5px;text-align:center;line-height:2}
+
+/* skeleton */
+.skel{
+  background:linear-gradient(90deg,var(--surface),var(--surface2) 50%,var(--surface));
+  background-size:300%;animation:skel-anim 1.4s ease infinite;border-radius:10px;
+}
+@keyframes skel-anim{0%{background-position:100%}100%{background-position:-100%}}
+
+/* ── RESULTS ── */
+.results{padding:24px;display:flex;flex-direction:column;gap:18px}
+
+.res-hdr{
+  display:flex;align-items:flex-start;justify-content:space-between;
+  padding-bottom:18px;border-bottom:1px solid var(--rim);
+}
+.algo-badge{
+  display:inline-flex;align-items:center;gap:8px;
+  background:rgba(200,255,87,.09);
+  border:1px solid rgba(200,255,87,.22);
+  border-radius:100px;padding:4px 14px 4px 8px;margin-bottom:8px;
+}
+.badge-dot{width:5px;height:5px;border-radius:50%;background:var(--a);box-shadow:0 0 7px var(--a)}
+.badge-txt{font-size:9px;letter-spacing:2.5px;color:var(--a)}
+.res-heading{
+  font-family:'Syne',sans-serif;font-size:30px;font-weight:800;
+  letter-spacing:-1.5px;color:var(--text);line-height:1;
+}
+.btn-export{
+  display:flex;align-items:center;gap:7px;
+  background:var(--surface);border:1px solid var(--rim);border-radius:9px;
+  padding:9px 15px;cursor:pointer;
+  font-family:'DM Mono',monospace;font-size:9.5px;letter-spacing:1px;color:var(--muted);
+  transition:all .15s;
+}
+.btn-export:hover{border-color:var(--rim2);color:var(--text)}
+
+/* stat cards */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:11px}
+.stat-card{
+  background:var(--surface);border:1px solid var(--rim);
+  border-radius:var(--rL);padding:18px 20px;
+  position:relative;overflow:hidden;transition:all .18s;
+  animation:pop-in .5s cubic-bezier(.34,1.56,.64,1) both;
+}
+.stat-card::after{
+  content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
+  background:var(--acc,var(--a));box-shadow:0 0 10px var(--acc,var(--a));
+}
+.stat-card:hover{border-color:var(--rim2);transform:translateY(-2px)}
+@keyframes pop-in{from{opacity:0;transform:scale(.9) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.s-lbl{font-size:7.5px;letter-spacing:2.5px;color:var(--muted);display:block;margin-bottom:10px}
+.s-val{
+  font-family:'Syne',sans-serif;font-size:30px;font-weight:800;
+  line-height:1;letter-spacing:-1px;color:var(--acc,var(--a));
+}
+.s-unit{font-size:12px;font-weight:400;opacity:.5;margin-left:1px;letter-spacing:0}
+.stat-card:hover{
+  box-shadow:0 0 20px rgba(200,255,87,0.15);
+}
+/* gantt */
+.gantt-card{
+  background:var(--surface);border:1px solid var(--rim);
+  border-radius:var(--rL);padding:22px;
+}
+.card-label{
+  font-size:8px;letter-spacing:3px;color:var(--muted);
+  display:flex;align-items:center;gap:8px;margin-bottom:18px;
+}
+.gantt-track{
+  height:58px;border-radius:9px;display:flex;overflow:hidden;
+  border:1px solid var(--rim);margin-bottom:10px;
+}
+.g-seg{
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Syne',sans-serif;font-size:10px;font-weight:800;color:#000;
+  position:relative;cursor:default;transition:filter .15s;overflow:hidden;
+}
+.g-seg::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(255,255,255,.22) 0%,transparent 55%,rgba(0,0,0,.12) 100%);
+}
+.g-seg:hover{filter:brightness(1.12)}
+.g-seg .seg-lbl{position:relative;z-index:1;text-shadow:0 1px 3px rgba(0,0,0,.4)}
+
+.gantt-axis{position:relative;height:20px}
+.g-tick{
+  position:absolute;transform:translateX(-50%);
+  font-size:8.5px;color:var(--ghost);letter-spacing:.5px;
+}
+.g-tick::before{content:'';position:absolute;top:-6px;left:50%;width:1px;height:4px;background:var(--rim2)}
+.gantt-track{
+  backdrop-filter: blur(14px) saturate(1.4);
+  background: rgba(255,255,255,0.03);
+}
+
+.g-seg{
+  backdrop-filter: blur(6px);
+  border-right:1px solid rgba(255,255,255,0.08);
+}
+/* metrics */
+.metrics-card{
+  background:var(--surface);border:1px solid var(--rim);
+  border-radius:var(--rL);overflow:hidden;
+}
+.metrics-top{
+  padding:18px 22px 14px;border-bottom:1px solid var(--rim);
+  font-size:8px;letter-spacing:3px;color:var(--muted);
+  display:flex;align-items:center;gap:8px;
+}
+table{width:100%;border-collapse:collapse}
+thead th{
+  font-size:7.5px;letter-spacing:2.5px;color:var(--ghost);font-weight:400;
+  text-align:left;padding:9px 22px;border-bottom:1px solid var(--rim);
+  background:rgba(0,0,0,.18);
+}
+tbody tr{transition:background .1s;animation:row-slide .35s ease both}
+@keyframes row-slide{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+tbody tr:hover{background:var(--surface2)}
+tbody td{padding:11px 22px;font-size:11.5px;border-bottom:1px solid var(--rim)}
+tbody tr:last-child td{border-bottom:none}
+.pid-cell{display:flex;align-items:center;gap:8px}
+.pid-dot{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-family:'Syne',sans-serif;font-size:7px;font-weight:800;color:#000;flex-shrink:0}
+
+.metrics-foot{
+  padding:12px 22px;border-top:1px solid var(--rim);
+  background:rgba(0,0,0,.18);
+  display:flex;flex-wrap:wrap;gap:10px;
+}
+.leg{display:flex;align-items:center;gap:5px;font-size:8px;letter-spacing:1px;color:var(--ghost)}
+.leg-k{background:var(--surface2);border:1px solid var(--rim);border-radius:4px;padding:1px 6px;color:var(--muted)}
+
+/* ── TOOLTIP ── */
+.tooltip{
+  position:fixed;z-index:9999;pointer-events:none;opacity:0;
+  background:rgba(6,7,10,.97);border:1px solid var(--rim2);border-radius:8px;
+  padding:7px 14px;font-size:9.5px;letter-spacing:1px;color:var(--text);
+  backdrop-filter:blur(20px);transition:opacity .1s;
+}
+.tooltip.show{opacity:1}
+
+/* ── TOAST ── */
+.toast{
+  position:fixed;bottom:26px;left:50%;
+  transform:translateX(-50%) translateY(10px) scale(.96);
+  z-index:9999;opacity:0;pointer-events:none;
+  background:rgba(12,15,20,.97);border:1px solid var(--rim2);border-radius:100px;
+  padding:9px 22px;
+  font-size:10.5px;letter-spacing:1px;
+  box-shadow:0 20px 50px rgba(0,0,0,.5);
+  backdrop-filter:blur(24px);
+  display:flex;align-items:center;gap:8px;white-space:nowrap;
+  transition:all .25s cubic-bezier(.34,1.56,.64,1);
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}
+.t-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+
+/* responsive */
+@media(max-width:960px){
+  .body{grid-template-columns:1fr}
+  .sidebar{max-height:none;border-right:none;border-bottom:1px solid var(--rim)}
+  .stats-row{grid-template-columns:1fr 1fr}
+}
+@media(max-width:600px){
+
+  .hdr{
+    padding:12px 16px;
+  }
+
+  .brand-name{
+    font-size:14px;
+  }
+
+  .sidebar{
+    padding-bottom:10px;
+  }
+
+  .form-grid{
+    grid-template-columns:1fr;
+  }
+
+  .algo-grid{
+    grid-template-columns:1fr;
+  }
+
+  .stats-row{
+    grid-template-columns:1fr;
+  }
+
+  .results{
+    padding:14px;
+  }
+
+  .res-heading{
+    font-size:22px;
+  }
+
+  .gantt-track{
+    height:44px;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="orbs">
+  <div class="orb o1"></div>
+  <div class="orb o2"></div>
+  <div class="orb o3"></div>
+</div>
+
+<div id="tooltip" class="tooltip"></div>
+<div id="toast" class="toast">
+  <div class="t-dot" id="tDot"></div>
+  <span id="tMsg"></span>
+</div>
+
+<div class="shell">
+
+  <!-- HEADER -->
+  <header class="hdr">
+    <div class="hdr-left">
+      <div class="logo">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <rect x="1" y="1" width="8" height="8" rx="1.5" fill="currentColor"/>
+          <rect x="11" y="1" width="8" height="8" rx="1.5" fill="currentColor" opacity=".65"/>
+          <rect x="1" y="11" width="8" height="8" rx="1.5" fill="currentColor" opacity=".65"/>
+          <rect x="11" y="11" width="8" height="8" rx="1.5" fill="currentColor" opacity=".35"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">NEXUS</div>
+        <div class="brand-sub">CPU Process Scheduler</div>
+      </div>
+    </div>
+    <div class="hdr-right">
+  <div class="status-pill">
+    <div class="live-dot"></div>LIVE
+  </div>
+
+ <a href="https://github.com/arkancodex/cpu-scheduler" target="_blank" class="github-btn">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 .5C5.73.5.75 5.48.75 11.75c0 4.87 3.15 9 7.52 10.45.55.1.75-.24.75-.53v-1.86c-3.06.67-3.7-1.3-3.7-1.3-.5-1.27-1.22-1.6-1.22-1.6-.99-.67.08-.66.08-.66 1.1.08 1.68 1.13 1.68 1.13.97 1.67 2.55 1.19 3.17.9.1-.7.38-1.2.68-1.48-2.44-.28-5-1.22-5-5.44 0-1.2.43-2.18 1.13-2.95-.12-.28-.49-1.4.1-2.9 0 0 .92-.3 3.02 1.13a10.5 10.5 0 012.75-.37c.93 0 1.87.13 2.75.37 2.1-1.43 3.02-1.13 3.02-1.13.59 1.5.22 2.62.1 2.9.7.77 1.13 1.75 1.13 2.95 0 4.23-2.56 5.16-5 5.44.39.34.73 1 .73 2.02v2.99c0 .3.2.64.75.53A10.99 10.99 0 0023.25 11.75C23.25 5.48 18.27.5 12 .5z"/>
+  </svg>
+  <span>GitHub</span>
+</a>
+</div>
+  </header>
+
+  <div class="body">
+
+    <!-- ═══ SIDEBAR ═══ -->
+    <aside class="sidebar">
+
+      <!-- Algorithm -->
+      <div class="sb-pad" style="padding-top:22px">
+        <div class="sec-lbl">Algorithm</div>
+        <div class="algo-grid" id="algoGrid">
+          <div class="algo-chip active" data-algo="fcfs" onclick="selectAlgo('fcfs')">
+            <span class="chip-idx">01</span>
+            <span class="chip-n">FCFS</span>
+            <div class="chip-active-bar"></div>
+          </div>
+          <div class="algo-chip" data-algo="sjf" onclick="selectAlgo('sjf')">
+            <span class="chip-idx">02</span>
+            <span class="chip-n">SJF</span>
+            <div class="chip-active-bar"></div>
+          </div>
+          <div class="algo-chip" data-algo="srtf" onclick="selectAlgo('srtf')">
+            <span class="chip-idx">03</span>
+            <span class="chip-n">SRTF</span>
+            <div class="chip-active-bar"></div>
+          </div>
+          <div class="algo-chip" data-algo="rr" onclick="selectAlgo('rr')">
+            <span class="chip-idx">04</span>
+            <span class="chip-n">Round Robin</span>
+            <div class="chip-active-bar"></div>
+          </div>
+          <div class="algo-chip" data-algo="priority" onclick="selectAlgo('priority')">
+            <span class="chip-idx">05</span>
+            <span class="chip-n">Priority</span>
+            <div class="chip-active-bar"></div>
+          </div>
+          <div class="algo-chip" data-algo="priority_preemptive" onclick="selectAlgo('priority_preemptive')">
+            <span class="chip-idx">06</span>
+            <span class="chip-n">Priority Pre.</span>
+            <div class="chip-active-bar"></div>
+          </div>
+        </div>
+        <div class="quantum-wrap" id="quantumWrap">
+          <span class="q-lbl">QUANTUM</span>
+          <input class="q-inp" type="number" id="quantumInput" value="2" min="1" max="99"/>
+          <span class="q-suf">units</span>
+        </div>
+      </div>
+
+      <div class="sb-divider" style="margin-top:20px"></div>
+
+      <!-- Add Process -->
+      <div class="sb-pad" style="padding-top:20px">
+        <div class="sec-lbl">New Process</div>
+        <div class="pid-row">
+          <div class="f-field">
+            <label>PROCESS ID</label>
+            <input type="text" id="pidInput" value="P1" maxlength="8"/>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="f-field">
+            <label>ARRIVAL</label>
+            <input type="number" id="arrInput" value="0" min="0"/>
+          </div>
+          <div class="f-field">
+            <label>BURST</label>
+            <input type="number" id="burstInput" value="1" min="1"/>
+          </div>
+          <div class="f-field">
+            <label>PRIORITY</label>
+            <input type="number" id="prioInput" value="0" min="0"/>
+          </div>
+        </div>
+        <button class="btn-add" onclick="addProcess()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          ADD TO QUEUE
+        </button>
+      </div>
+
+      <div class="sb-divider" style="margin-top:18px"></div>
+
+      <!-- Queue -->
+      <div class="sb-pad" style="padding-top:18px;flex:1">
+        <div class="queue-hdr">
+          <div class="q-title-group">
+            <div class="ring-wrap">
+              <svg class="ring-svg" viewBox="0 0 28 28">
+                <circle class="ring-track" cx="14" cy="14" r="12"/>
+                <circle class="ring-fill" id="ringFill" cx="14" cy="14" r="12"/>
+              </svg>
+              <div class="ring-val" id="ringVal">0</div>
+            </div>
+            <span class="q-title">QUEUE</span>
+          </div>
+          <button class="btn-sample" onclick="loadSample()">SAMPLE DATA</button>
+        </div>
+        <div id="processList">
+          <div class="proc-empty">NO PROCESSES IN QUEUE</div>
+        </div>
+      </div>
+
+      <!-- Simulate -->
+      <div class="sb-foot">
+        <button class="btn-sim" id="simBtn" onclick="simulate()">
+          <svg class="sim-icon" id="simIcon" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5,3 19,12 5,21"/>
+          </svg>
+          RUN SIMULATION
+        </button>
+      </div>
+
+    </aside>
+
+    <!-- ═══ STAGE ═══ -->
+    <main class="stage" id="stage">
+      <div class="empty-state" id="emptyState">
+        <svg class="cpu-anim" viewBox="0 0 110 110" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="22" y="22" width="66" height="66" rx="9" stroke="rgba(200,255,87,0.18)" stroke-width="1.5" stroke-dasharray="5 3"/>
+          <rect x="35" y="35" width="40" height="40" rx="5" fill="rgba(200,255,87,0.04)" stroke="rgba(200,255,87,0.3)" stroke-width="1.2">
+            <animate attributeName="stroke-opacity" values="0.3;0.7;0.3" dur="2.4s" repeatCount="indefinite"/>
+          </rect>
+          <line x1="8" y1="46" x2="35" y2="46" stroke="rgba(200,255,87,0.28)" stroke-width="1.5"/>
+          <line x1="8" y1="55" x2="35" y2="55" stroke="rgba(87,184,255,0.28)" stroke-width="1.5"/>
+          <line x1="8" y1="64" x2="35" y2="64" stroke="rgba(200,255,87,0.28)" stroke-width="1.5"/>
+          <line x1="75" y1="46" x2="102" y2="46" stroke="rgba(87,184,255,0.28)" stroke-width="1.5"/>
+          <line x1="75" y1="55" x2="102" y2="55" stroke="rgba(200,255,87,0.28)" stroke-width="1.5"/>
+          <line x1="75" y1="64" x2="102" y2="64" stroke="rgba(87,184,255,0.28)" stroke-width="1.5"/>
+          <line x1="46" y1="8" x2="46" y2="35" stroke="rgba(192,132,252,0.28)" stroke-width="1.5"/>
+          <line x1="55" y1="8" x2="55" y2="35" stroke="rgba(200,255,87,0.28)" stroke-width="1.5"/>
+          <line x1="64" y1="8" x2="64" y2="35" stroke="rgba(192,132,252,0.28)" stroke-width="1.5"/>
+          <line x1="46" y1="75" x2="46" y2="102" stroke="rgba(200,255,87,0.28)" stroke-width="1.5"/>
+          <line x1="55" y1="75" x2="55" y2="102" stroke="rgba(87,184,255,0.28)" stroke-width="1.5"/>
+          <line x1="64" y1="75" x2="64" y2="102" stroke="rgba(200,255,87,0.28)" stroke-width="1.5"/>
+          <line x1="43" y1="55" x2="67" y2="55" stroke="rgba(200,255,87,0.45)" stroke-width="1">
+            <animate attributeName="x2" values="67;62;67" dur="2s" repeatCount="indefinite"/>
+          </line>
+          <line x1="55" y1="43" x2="55" y2="67" stroke="rgba(200,255,87,0.45)" stroke-width="1">
+            <animate attributeName="y2" values="67;62;67" dur="2s" repeatCount="indefinite"/>
+          </line>
+          <circle cx="55" cy="55" r="3.5" fill="rgba(200,255,87,0.9)">
+            <animate attributeName="r" values="3.5;5.5;3.5" dur="2s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="0.9;0.4;0.9" dur="2s" repeatCount="indefinite"/>
+          </circle>
+        </svg>
+        <div class="empty-h">No simulation yet</div>
+        <div class="empty-p">Configure processes on the left<br>and hit RUN SIMULATION</div>
+      </div>
+    </main>
+
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════
+// CONFIG
+// ══════════════════════════════════════════════════
+const BACKEND_URL = 'http://localhost:5000';
+
+const COLORS = [
+  '#c8ff57','#57b8ff','#ff6b6b','#c084fc',
+  '#34d399','#fb923c','#f472b6','#38bdf8',
+  '#a78bfa','#4ade80'
+];
+
+let processes = [];
+let pidCounter = 1;
+let selectedAlgo = 'fcfs';
+const pidColorMap = {};
+function getColor(pid){ return pidColorMap[pid] || COLORS[0]; }
+
+// ══════════════════════════════════════════════════
+// ALGO SELECTION (replaces old select dropdown)
+// ══════════════════════════════════════════════════
+function selectAlgo(algo) {
+  selectedAlgo = algo;
+  document.querySelectorAll('.algo-chip').forEach(c =>
+    c.classList.toggle('active', c.dataset.algo === algo)
+  );
+  document.getElementById('quantumWrap').className =
+    'quantum-wrap' + (algo === 'rr' ? ' show' : '');
+}
+
+// ══════════════════════════════════════════════════
+// PROCESS MANAGEMENT
+// ══════════════════════════════════════════════════
+function addProcess() {
+  const pid = document.getElementById('pidInput').value.trim();
+  const at  = parseInt(document.getElementById('arrInput').value) || 0;
+  const bt  = parseInt(document.getElementById('burstInput').value) || 1;
+  const pr  = parseInt(document.getElementById('prioInput').value) || 0;
+
+  if (!pid) { toast('Process ID required', 'error'); return; }
+  if (processes.find(p => p.pid === pid)) { toast(`${pid} already exists`, 'error'); return; }
+  if (bt < 1) { toast('Burst time ≥ 1 required', 'error'); return; }
+  if (processes.length >= 20) { toast('Max 20 processes', 'error'); return; }
+
+  const idx = processes.length;
+  pidColorMap[pid] = COLORS[idx % COLORS.length];
+  processes.push({ pid, arrival_time: at, burst_time: bt, priority: pr });
+  pidCounter++;
+
+  const nextNum = parseInt(pid.replace(/\D/g,'')) || 0;
+  const prefix  = pid.replace(/\d+$/, '') || 'P';
+  document.getElementById('pidInput').value = prefix + (nextNum + 1);
+
+  renderList();
+  toast(`${pid} added to queue`, 'success');
+}
+
+function delProcess(pid) {
+  processes = processes.filter(p => p.pid !== pid);
+  renderList();
+}
+
+function loadSample() {
+  processes = [];
+  const sample = [
+    { pid:'P1', arrival_time:0, burst_time:5, priority:2 },
+    { pid:'P2', arrival_time:1, burst_time:3, priority:1 },
+    { pid:'P3', arrival_time:2, burst_time:8, priority:3 },
+    { pid:'P4', arrival_time:3, burst_time:6, priority:0 },
+  ];
+  sample.forEach((p,i) => { pidColorMap[p.pid] = COLORS[i]; processes.push(p); });
+  pidCounter = 5;
+  document.getElementById('pidInput').value = 'P5';
+  renderList();
+  toast('Sample loaded', 'success');
+}
+
+function renderList() {
+  const el  = document.getElementById('processList');
+  const max = 20;
+  // Update ring progress indicator
+  const circumference = 75;
+  const pct = (processes.length / max) * circumference;
+  document.getElementById('ringFill').style.strokeDashoffset = circumference - pct;
+  document.getElementById('ringVal').textContent = processes.length;
+
+  if (!processes.length) {
+    el.innerHTML = '<div class="proc-empty">NO PROCESSES IN QUEUE</div>';
+    return;
+  }
+
+  el.innerHTML = processes.map((p, i) => {
+    const clr = COLORS[i % COLORS.length];
+    const label = p.pid.replace(/\d/g, '').slice(0,1) +
+                  (p.pid.match(/\d+/)?.[0]?.slice(-1) || '');
+    return `<div class="p-card" style="--pc:${clr};animation-delay:${i * 0.04}s">
+      <div class="p-avatar" style="background:${clr}">${label.toUpperCase()}</div>
+      <div class="p-meta">
+        <div class="p-name">${p.pid}</div>
+        <div class="p-tags">
+          <span class="p-tag">AT ${p.arrival_time}</span>
+          <span class="p-tag">BT ${p.burst_time}</span>
+          <span class="p-tag">PR ${p.priority}</span>
+        </div>
+      </div>
+      <button class="btn-rm" onclick="delProcess('${p.pid}')">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════
+// SIMULATE — calls Flask backend
+// ══════════════════════════════════════════════════
+async function simulate() {
+  if (!processes.length) { toast('Add processes first', 'error'); return; }
+
+  const algo = selectedAlgo;
+  const q    = parseInt(document.getElementById('quantumInput').value) || 2;
+  const btn  = document.getElementById('simBtn');
+  const icon = document.getElementById('simIcon');
+
+  btn.disabled = true;
+  icon.innerHTML = '<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="28" stroke-dashoffset="8"/>';
+  icon.classList.add('spin');
+
+  showLoading();
+  await new Promise(r => setTimeout(r, 380));
+
+  try {
+    const res = await fetch(`${BACKEND_URL}/simulate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ algorithm: algo, processes, quantum: q })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Server error ${res.status}`);
+    }
+    renderResults(await res.json());
+  } catch (e) {
+    const msg = e.name === 'TypeError'
+      ? 'Cannot reach backend — run python app.py'
+      : 'Error: ' + e.message;
+    toast(msg, 'error');
+    clearResults();
+  }
+
+  btn.disabled = false;
+  icon.innerHTML = '<polygon points="5,3 19,12 5,21"/>';
+  icon.classList.remove('spin');
+}
+
+// ══════════════════════════════════════════════════
+// RENDER STATES
+// ══════════════════════════════════════════════════
+function showLoading() {
+  document.getElementById('stage').innerHTML = `
+  <div class="results">
+    <div style="padding-bottom:18px;border-bottom:1px solid var(--rim);display:flex;justify-content:space-between">
+      <div>
+        <div class="skel" style="width:130px;height:22px;margin-bottom:10px"></div>
+        <div class="skel" style="width:200px;height:34px"></div>
+      </div>
+    </div>
+    <div class="stats-row">
+      ${[...Array(4)].map((_,i) => `<div class="skel" style="height:94px;animation-delay:${i*.07}s"></div>`).join('')}
+    </div>
+    <div class="skel" style="height:108px"></div>
+    <div class="skel" style="height:260px"></div>
+  </div>`;
+}
+
+function clearResults() {
+  document.getElementById('stage').innerHTML = `
+  <div class="empty-state">
+    <div style="font-size:36px;opacity:.18">✕</div>
+    <div class="empty-h" style="color:var(--c)">Simulation Failed</div>
+    <div class="empty-p">Check that the Python server is running<br>and your process data is valid</div>
+  </div>`;
+}
+
+function renderResults(result) {
+  const gantt     = result.gantt;
+  const totalTime = Math.max(...gantt.map(b => b.end));
+  const startTime = Math.min(...gantt.map(b => b.start));
+  const span      = totalTime - startTime || 1;
+
+  // Gantt bars
+  const bars = gantt.map(b => {
+    const w   = ((b.end - b.start) / span) * 100;
+    const clr = getColor(b.pid);
+    const lbl = (b.end - b.start) >= 1 ? b.pid : '';
+    return `<div class="g-seg" style="width:${w}%;background:${clr};"
+      onmouseenter="showTip(event,'${b.pid}: t${b.start}→t${b.end} (${b.end-b.start} units)')"
+      onmouseleave="hideTip()">
+      <span class="seg-lbl">${lbl}</span>
+    </div>`;
+  }).join('');
+
+  // Axis ticks
+  const tickSet = new Set();
+  gantt.forEach(b => { tickSet.add(b.start); tickSet.add(b.end); });
+  const ticks = [...tickSet].sort((a,b) => a-b).map(t => {
+    const pct = ((t - startTime) / span) * 100;
+    return `<span class="g-tick" style="left:${pct}%">${t}</span>`;
+  }).join('');
+
+  // Stat cards
+  const STATS = [
+    { lbl:'AVG WAITING TIME',  val:result.avg_wt,   unit:'ms', acc:'var(--a)' },
+    { lbl:'AVG TURNAROUND',    val:result.avg_tat,  unit:'ms', acc:'var(--b)' },
+    { lbl:'AVG RESPONSE TIME', val:result.avg_rt,   unit:'ms', acc:'var(--d)' },
+    { lbl:'CPU UTILIZATION',   val:result.cpu_util, unit:'%',  acc:'var(--e)' },
+  ];
+  const cards = STATS.map((s, i) => `
+  <div class="stat-card" style="--acc:${s.acc};animation-delay:${0.06+i*.06}s">
+    <span class="s-lbl">${s.lbl}</span>
+    <div class="s-val">${s.val}<span class="s-unit">${s.unit}</span></div>
+  </div>`).join('');
+
+  // Table rows
+  const rows = result.metrics.map((m, i) => {
+    const clr = getColor(m.pid);
+    const lbl = m.pid.replace(/\d/g,'').slice(0,1) + (m.pid.match(/\d+/)?.[0]?.slice(-1) || '');
+    return `<tr style="animation-delay:${i*.04}s">
+      <td><div class="pid-cell">
+        <div class="pid-dot" style="background:${clr}">${lbl.toUpperCase()}</div>${m.pid}
+      </div></td>
+      <td>${m.at}</td><td>${m.bt}</td><td>${m.ct}</td>
+      <td style="color:var(--b)">${m.tat}</td>
+      <td style="color:var(--a)">${m.wt}</td>
+      <td style="color:var(--e)">${m.rt}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('stage').innerHTML = `
+  <div class="results">
+
+    <div class="res-hdr">
+      <div>
+        <div class="algo-badge">
+          <div class="badge-dot"></div>
+          <span class="badge-txt">${result.algorithm}</span>
+        </div>
+        <div class="res-heading">Results</div>
+      </div>
+      <button class="btn-export" onclick="exportPDF()">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Export PDF
+      </button>
+    </div>
+
+    <div class="stats-row">${cards}</div>
+
+    <div class="gantt-card">
+      <div class="card-label">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <rect x="3" y="4" width="18" height="18" rx="2"/>
+          <line x1="16" y1="2" x2="16" y2="6"/>
+          <line x1="8" y1="2" x2="8" y2="6"/>
+          <line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        GANTT CHART
+      </div>
+      <div class="gantt-track" id="ganttTrack">${bars}</div>
+      <div class="gantt-axis">${ticks}</div>
+    </div>
+
+    <div class="metrics-card">
+      <div class="metrics-top">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M3 3v18h18"/><polyline points="18 17 13 12 9 16 5 12"/>
+        </svg>
+        PROCESS METRICS
+      </div>
+      <table>
+        <thead><tr>
+          <th>PROCESS</th><th>AT</th><th>BT</th><th>CT</th>
+          <th style="color:var(--b)">TAT</th>
+          <th style="color:var(--a)">WT</th>
+          <th style="color:var(--e)">RT</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="metrics-foot">
+        <span class="leg"><span class="leg-k">AT</span>Arrival</span>
+        <span class="leg"><span class="leg-k">BT</span>Burst</span>
+        <span class="leg"><span class="leg-k">CT</span>Completion</span>
+        <span class="leg"><span class="leg-k" style="color:var(--b)">TAT</span>Turnaround</span>
+        <span class="leg"><span class="leg-k" style="color:var(--a)">WT</span>Waiting</span>
+        <span class="leg"><span class="leg-k" style="color:var(--e)">RT</span>Response</span>
+      </div>
+    </div>
+
+  </div>`;
+
+  // Animate Gantt segments in
+  setTimeout(() => {
+    document.querySelectorAll('.g-seg').forEach((s, i) => {
+      s.style.transform = 'scaleX(0)';
+      s.style.transformOrigin = 'left';
+      s.style.transition = `transform .42s cubic-bezier(.34,1.56,.64,1) ${i * .05}s`;
+      requestAnimationFrame(() => requestAnimationFrame(() => { s.style.transform = 'scaleX(1)'; }));
+    });
+  }, 50);
+}
+
+// ══════════════════════════════════════════════════
+// TOOLTIP
+// ══════════════════════════════════════════════════
+const TIP = document.getElementById('tooltip');
+function showTip(e, text) {
+  TIP.textContent = text;
+  TIP.classList.add('show');
+  TIP.style.left = (e.clientX + 13) + 'px';
+  TIP.style.top  = (e.clientY - 40) + 'px';
+}
+function hideTip() { TIP.classList.remove('show'); }
+document.addEventListener('mousemove', e => {
+  if (TIP.classList.contains('show')) {
+    TIP.style.left = (e.clientX + 13) + 'px';
+    TIP.style.top  = (e.clientY - 40) + 'px';
+  }
+});
+
+// ══════════════════════════════════════════════════
+// TOAST
+// ══════════════════════════════════════════════════
+const CLR = { error:'#ff6b6b', success:'#c8ff57', info:'#57b8ff' };
+let tTimer;
+function toast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  document.getElementById('tMsg').textContent = msg;
+  const c = CLR[type] || CLR.info;
+  document.getElementById('tDot').style.background = c;
+  el.style.borderColor = c;
+  el.classList.add('show');
+  clearTimeout(tTimer);
+  tTimer = setTimeout(() => el.classList.remove('show'), 2700);
+}
+
+function exportPDF() {
+  toast('Opening print dialog...', 'info');
+  setTimeout(() => window.print(), 400);
+}
+
+// ══════════════════════════════════════════════════
+// KEYBOARD SHORTCUT
+// ══════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') simulate();
+});
+
+// INIT
+renderList();
+</script>
+</body>
+</html>
