@@ -737,7 +737,10 @@ tbody tr:last-child td{border-bottom:none}
 // ══════════════════════════════════════════════════
 // CONFIG
 // ══════════════════════════════════════════════════
-const BACKEND_URL = 'http://localhost:5000';
+const BACKEND_URL =
+  window.location.hostname === "localhost"
+    ? "http://localhost:5000"
+    : "https://cpu-scheduler-backend-f1fp.onrender.com";
 
 const COLORS = [
   '#c8ff57','#57b8ff','#ff6b6b','#c084fc',
